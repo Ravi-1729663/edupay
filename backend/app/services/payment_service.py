@@ -300,6 +300,9 @@ def complete_reversal(db: Session, reversal_id: str, approver_id: str) -> Paymen
     transition(db, p, PaymentStatus.REVERSED, approver_id, metadata={"reversal_id": rev.id})
     rev.status = ReversalStatus.COMPLETED
     rev.completed_at = datetime.now(timezone.utc)
+    # Flush so the REVERSED status + reversal row are visible to the
+    # outstanding recompute below (autoflush is off on this session).
+    db.flush()
     # Recompute affected installments' cached status.
     for a in p.allocations:
         _refresh_installment_status(db, db.get(Installment, a.installment_id))

@@ -47,7 +47,11 @@ class ReconciliationBatch(Base, UUIDPkMixin, TimestampMixin, CreatedByMixin):
 
 class ReconciliationLine(Base, UUIDPkMixin, CreatedByMixin):
     """Note: does NOT inherit TimestampMixin — reconciliation lines are
-    immutable write-once per batch; only `created_at` is meaningful."""
+    immutable write-once per batch; only `created_at` is meaningful.
+
+    Package C adds the exception-review columns (resolved_*). Resolving a
+    line never mutates financial truth (payments / allocations / installments)
+    — it only records a FINANCE_MANAGER's decision about the settlement line."""
 
     __tablename__ = "reconciliation_lines"
     batch_id: Mapped[str] = mapped_column(
@@ -61,11 +65,28 @@ class ReconciliationLine(Base, UUIDPkMixin, CreatedByMixin):
     payment_id: Mapped[Optional[str]] = mapped_column(
         String(36), ForeignKey("payments.id", ondelete="SET NULL"), nullable=True
     )
+    # Original engine classification (MATCHED/AMOUNT_MISMATCH/MISSING_INTERNAL/
+    # MISSING_EXTERNAL/DUPLICATE). Never mutated after insert.
     classification: Mapped[ReconciliationClassification] = mapped_column(
         Enum(ReconciliationClassification, name="recon_class"),
         nullable=False,
     )
+    # Engine's suggested match for human review (reference + date-window + amount).
+    suggested_payment_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("payments.id", ondelete="SET NULL"), nullable=True
+    )
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # ── Exception-review workflow (Package C) ──
+    resolved_classification: Mapped[Optional[str]] = mapped_column(
+        String(24), nullable=True
+    )
+    resolved_by: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    resolved_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    resolution_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -74,4 +95,5 @@ class ReconciliationLine(Base, UUIDPkMixin, CreatedByMixin):
         CheckConstraint("external_amount > 0", name="ck_recon_line_amount_positive"),
         Index("ix_recon_lines_batch_id", "batch_id"),
         Index("ix_recon_lines_external_reference", "external_reference"),
+        Index("ix_recon_lines_resolved_classification", "resolved_classification"),
     )

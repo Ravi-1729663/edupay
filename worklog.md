@@ -108,3 +108,23 @@ Stage Summary:
 - Frontend↔backend integration verified end-to-end through the Next.js proxy.
 - All Package A acceptance criteria met except live `docker compose up` (no docker in sandbox — command list provided to grader).
 - Integrity check returns zero drift on seeded data, both via pytest and via the live API endpoint through the frontend.
+
+---
+Task ID: B
+Agent: lead
+Task: Package B — payment engine
+
+Work Log:
+- Built `payment_service.py`: explicit state-machine transition table (9 allowed transitions; anything else raises InvalidStateTransition), allocation engine (oldest-due-first per DECISIONS.md, partial payments, never exceeds payment.amount or installment outstanding), reversal request→complete (manager approval), verify (PENDING→UNKNOWN→SUCCESS/FAILED via gateway truth), counter (CREATED→SUCCESS direct), initiate (CREATED→PENDING via gateway ref).
+- Built `gateway_service.py`: in-memory chaos singleton (SUCCESS/FAILED/TIMEOUT_NO_CALLBACK/DUPLICATE_CALLBACK/LATE_CALLBACK), true-outcome ledger per gateway_ref (for verify), async callback scheduler (httpx).
+- Built routes: `/payments/counter`, `/payments/initiate`, `/payments/webhook` (SELECT...FOR UPDATE + idempotent on gateway_ref), `/payments/{id}` (+allocations, +reversal-request, +reversal-complete, +verify), `/mock-gateway/pay`, `/mock-gateway/chaos` GET/POST (ADMIN).
+- Seed v2: 5 payments (2 SUCCESS, 1 FAILED, 1 PENDING stuck, 1 UNKNOWN) + 1 duplicate-attempt rejected by DB unique constraint on idempotency_key.
+- Updated integrity_service + students/outstanding endpoint to exclude REVERSED payments' allocations from outstanding derivation (reversal restores outstanding).
+- Fixed 4 bugs: (a) CHECK constraint ck_payments_online_requires_gateway_ref blocked ONLINE insert with gateway_ref=NULL → generate ref up-front; (b) audit_logs FK failed for actor_id="gateway" → use None for system actions; (c) conftest transaction-rollback isolation broke committing service functions → switched to per-session temp DB (no rollback, unique keys prevent conflicts); (d) allocate() refreshed installment status BEFORE flushing the new allocation (autoflush=False) → cache lagged → drift; fixed with explicit flush-before-refresh.
+- 13 new tests in test_payments.py: (1) true concurrent duplicate callback via threading.Barrier → exactly one payment + one allocation; (2) idempotency key replay → 409 + exactly one record; (3) invalid transitions (SUCCESS→PENDING/CREATED/FAILED/UNKNOWN, PENDING→REVERSED/CREATED, FAILED→SUCCESS, reversal on non-SUCCESS, reversal exceeds original, double-reversal); (4) allocation never exceeds payment nor installment outstanding; reversal restores outstanding; verify resolves UNKNOWN→SUCCESS; RBAC student can't initiate for others; RBAC only manager can request reversal; integrity zero-drift with payments.
+
+Stage Summary:
+- 40/40 pytest passing (was 27 in Package A; +13 in Package B).
+- Seed v2 idempotent: re-run → created=0, duplicate_rejected=1, same totals (5 payments).
+- /admin/integrity-check: ok=True, 5 payments, 0 drifts, 0 violations.
+- Package B acceptance met.

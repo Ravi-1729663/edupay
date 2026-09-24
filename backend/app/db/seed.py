@@ -524,6 +524,121 @@ def _seed_payments_v2(db: Session, students: list[Student], admin_id: str) -> di
     return counts
 
 
+def _seed_reconciliation_v3(db: Session, students: list[Student], admin_id: str) -> dict:
+    """Seed v3: a reconciliation batch with one line of EACH classification
+    (MATCHED, AMOUNT_MISMATCH, MISSING_INTERNAL, MISSING_EXTERNAL, DUPLICATE)
+    + a reversed payment (SUCCESS → reversal-request → reversal-complete).
+
+    Idempotent: checks by source_file_name + idempotency keys.
+    """
+    from app.models.payment import Payment, PaymentMethod, PaymentStatus
+    from app.models.reconciliation import ReconciliationBatch, ReconciliationClassification
+    from app.services import gateway_service, payment_service, reconciliation_service
+
+    staff = db.execute(select(User).where(User.email == "staff@edupay.college")).scalar_one()
+    mgr = db.execute(select(User).where(User.email == "manager@edupay.college")).scalar_one()
+
+    counts = {"reversed_payment": 0, "recon_batch_lines": 0}
+
+    # ── A reversed payment ───────────────────────────────────────────
+    # Pick a student we haven't used for the v2 payments (students[5] was the
+    # duplicate-attempt target; use students[6] here).
+    rev_student = students[6] if len(students) > 6 else students[-1]
+    rev_key = "seed-reversed-success"
+    existing_rev = db.execute(
+        select(Payment).where(Payment.idempotency_key == rev_key)
+    ).scalar_one_or_none()
+    if existing_rev is None:
+        p = payment_service.create_counter_payment(
+            db,
+            student_id=rev_student.id,
+            amount=Decimal("700.00"),
+            method=PaymentMethod.CASH,
+            idempotency_key=rev_key,
+            initiated_by=staff.id,
+        )
+        rev = payment_service.request_reversal(db, p.id, Decimal("700.00"), "seed v3 reversal demo", staff.id)
+        payment_service.complete_reversal(db, rev.id, mgr.id)
+        counts["reversed_payment"] += 1
+    else:
+        counts["reversed_payment"] += 1  # already exists
+
+    # ── A reconciliation batch with one of each classification ────────
+    source_name = "seed-recon-v3.csv"
+    existing_batch = db.execute(
+        select(ReconciliationBatch).where(ReconciliationBatch.source_file_name == source_name)
+    ).scalar_one_or_none()
+    if existing_batch is None:
+        # We need THREE SUCCESS online payments with distinct gateway_refs to
+        # exercise MATCHED, AMOUNT_MISMATCH, and MISSING_EXTERNAL:
+        #   - Payment A (v2 online-success): ref_A, amount 2000  → MATCHED
+        #   - Payment B (new): ref_B, amount 123  → AMOUNT_MISMATCH (CSV says 999)
+        #   - Payment C (new): ref_C, amount 456  → MISSING_EXTERNAL (not in CSV)
+        online_succ = db.execute(
+            select(Payment).where(Payment.idempotency_key == "seed-online-success")
+        ).scalar_one()
+        ref_a = online_succ.gateway_ref
+        amt_a = str(online_succ.amount)
+
+        # Payment B for AMOUNT_MISMATCH.
+        key_b = "seed-recon-amt-mismatch"
+        if db.execute(select(Payment).where(Payment.idempotency_key == key_b)).scalar_one_or_none() is None:
+            _, gref_b, _ = payment_service.initiate_online_payment(
+                db,
+                student_id=(students[8] if len(students) > 8 else students[-1]).id,
+                amount=Decimal("123.00"),
+                idempotency_key=key_b,
+                initiated_by=staff.id,
+            )
+            gateway_service.record_true_outcome(gref_b, "SUCCESS")
+            payment_service.apply_webhook_callback(db, gref_b, PaymentStatus.SUCCESS, Decimal("123.00"), staff.id)
+        p_b = db.execute(select(Payment).where(Payment.idempotency_key == key_b)).scalar_one()
+        ref_b = p_b.gateway_ref
+
+        # Payment C for MISSING_EXTERNAL (NOT referenced in the CSV).
+        key_c = "seed-recon-missing-external"
+        if db.execute(select(Payment).where(Payment.idempotency_key == key_c)).scalar_one_or_none() is None:
+            _, gref_c, _ = payment_service.initiate_online_payment(
+                db,
+                student_id=(students[9] if len(students) > 9 else students[-1]).id,
+                amount=Decimal("456.00"),
+                idempotency_key=key_c,
+                initiated_by=staff.id,
+            )
+            gateway_service.record_true_outcome(gref_c, "SUCCESS")
+            payment_service.apply_webhook_callback(db, gref_c, PaymentStatus.SUCCESS, Decimal("456.00"), staff.id)
+
+        # CSV:
+        #   ref_a, amt_a          → MATCHED
+        #   ref_b, 999.00         → AMOUNT_MISMATCH (ref matches B but amount differs)
+        #   missing_ref, 999.00   → MISSING_INTERNAL (no internal payment)
+        #   missing_ref, 999.00   → DUPLICATE (2nd occurrence of missing_ref)
+        missing_ref = "SETTLEMENT-NO-INTERNAL-REF"
+        csv_content = (
+            "external_reference,external_amount,student_roll\n"
+            f"{ref_a},{amt_a},\n"
+            f"{ref_b},999.00,\n"
+            f"{missing_ref},999.00,\n"
+            f"{missing_ref},999.00,\n"
+        )
+        # Payment C is deliberately NOT in the CSV → MISSING_EXTERNAL.
+
+        batch, lines = reconciliation_service.upload(
+            db, csv_content=csv_content, uploaded_by=mgr.id, source_file_name=source_name
+        )
+        counts["recon_batch_lines"] = len(lines)
+    else:
+        # Already seeded; just count existing lines.
+        from app.models.reconciliation import ReconciliationLine
+        lines = list(db.execute(
+            select(ReconciliationLine).where(ReconciliationLine.batch_id == existing_batch.id)
+        ).scalars().all())
+        counts["recon_batch_lines"] = len(lines)
+
+    db.commit()
+    return counts
+
+
 def run(reset: bool = False) -> None:
     from app.core.logging import setup_logging
     setup_logging("INFO")
@@ -549,10 +664,12 @@ def run(reset: bool = False) -> None:
         _, students = _seed_students(db, program_ids, head_ids, structure_ids, admin_id, n=300)
         _seed_concessions(db, students, admin_id)
         payments_v2 = _seed_payments_v2(db, students, admin_id)
+        recon_v3 = _seed_reconciliation_v3(db, students, admin_id)
 
         db.commit()
         # Final counts for the log line
         from app.models.payment import Payment, PaymentStatus as PS
+        from app.models.reconciliation import ReconciliationLine, ReconciliationBatch
         counts = {
             "users": db.execute(select(User)).scalars().all().__len__(),
             "students": db.execute(select(Student)).scalars().all().__len__(),
@@ -568,7 +685,11 @@ def run(reset: bool = False) -> None:
             "payments_failed": db.execute(select(Payment).where(Payment.status == PS.FAILED)).scalars().all().__len__(),
             "payments_pending": db.execute(select(Payment).where(Payment.status == PS.PENDING)).scalars().all().__len__(),
             "payments_unknown": db.execute(select(Payment).where(Payment.status == PS.UNKNOWN)).scalars().all().__len__(),
+            "payments_reversed": db.execute(select(Payment).where(Payment.status == PS.REVERSED)).scalars().all().__len__(),
             "payments_v2": payments_v2,
+            "recon_batches": db.execute(select(ReconciliationBatch)).scalars().all().__len__(),
+            "recon_lines": db.execute(select(ReconciliationLine)).scalars().all().__len__(),
+            "recon_v3": recon_v3,
         }
         log.info("seed.done", extra={"counts": counts})
         print("SEED COMPLETE:", counts)
