@@ -1,22 +1,28 @@
 /**
  * EduPay frontend API helper.
  *
- * Caddy gateway on the sandbox (port 81) forwards requests that carry
- * `?XTransformPort=N` to `localhost:N`. In local dev we therefore call
- * relative URLs of the form `/auth/login?XTransformPort=8000`.
+ * All calls go through the Next.js server-side catch-all proxy at
+ * `/api/edupay/<path>` (see `src/app/api/edupay/[...path]/route.ts`), which
+ * forwards to the backend on `${BACKEND_URL}` (default
+ * `http://localhost:8000`). This keeps every API call same-origin (no CORS
+ * preflight, no `?XTransformPort` needed) and works identically in:
+ *   - the sandbox preview (Next.js server reaches localhost:8000 directly)
+ *   - docker (set `BACKEND_URL=http://backend:8000`)
  *
- * For docker later, set `NEXT_PUBLIC_API_BASE=http://localhost:8000` to make
- * all calls absolute (and skip the XTransformPort query entirely).
+ * For an absolute override (e.g. pointing at a remote backend), set
+ * `NEXT_PUBLIC_API_BASE=https://api.example.com` and the helper will skip the
+ * proxy prefix entirely.
  */
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "";
-const XPORT = process.env.NEXT_PUBLIC_XFORM_PORT ?? "8000";
+const PROXY_PREFIX = "/api/edupay";
 
-/** Build a URL string suitable for fetch(): relative-with-port or absolute. */
+/** Build a URL string suitable for fetch(): proxied-relative or absolute. */
 export function apiUrl(path: string): string {
   if (API_BASE) return API_BASE + path;
-  const sep = path.includes("?") ? "&" : "?";
-  return path + sep + "XTransformPort=" + XPORT;
+  // Strip a leading slash so "/auth/login" → "/api/edupay/auth/login".
+  const p = path.startsWith("/") ? path : "/" + path;
+  return PROXY_PREFIX + p;
 }
 
 export class ApiError extends Error {

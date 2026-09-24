@@ -64,3 +64,24 @@ Stage Summary:
 - Backend contract fully wired for: POST /auth/login, GET /auth/me, GET /admin/integrity-check, GET /students (+ outstanding drilldown), GET /users, GET /admin/audit-logs. Calls go through the Caddy gateway via `?XTransformPort=8000` (override with `NEXT_PUBLIC_API_BASE`).
 - UX: emerald/slate/stone/amber/red palette (no indigo/blue primary), responsive tables (overflow-x-auto), skeleton loading states, red Alert error states with code + request_id, sticky footer, framer-motion tab fades.
 - Chaos panel is visually present (required by brief) but inert — wiring deferred to Package B.
+
+---
+Task ID: 11
+Agent: lead
+Task: Execute — install deps, run migration, seed, tests, verify acceptance
+
+Work Log:
+- Installed backend deps via /home/z/.venv (sqlalchemy 2.0.54, alembic 1.14.1, pydantic-settings 2.13.1, passlib+bcrypt4, jose, psycopg2, etc.).
+- Ran `alembic upgrade head` against SQLite → all 17 tables + alembic_version created clean.
+- Ran `python -m app.db.seed` → 304 users, 300 students, 6 fee heads, 4 fee structures, 300 assignments, 900 installments, 2 pending concessions.
+- Re-ran seed → identical counts (idempotent ✓).
+- Integrity checker against seeded data: ok=True, 300 students, 900 installments, 0 drifts, 0 violations ✓.
+- pytest: 27/27 passing (test_auth 12, test_integrity 4, test_models 11) ✓.
+- Fixed 4 bugs surfaced by execution: (a) missing `Integer` import in audit.py, (b) SQLite batch-alter for deferred users↔students FK, (c) User/Department/Program/FeeHead have no created_by column (removed from seed), (d) pydantic-settings JSON-parsing CORS as CSV, (e) admin.py route shadowed imported service `check` (renamed alias to `run_integrity_check`), (f) email-validator rejects `.test` TLD → switched all emails to `@edupay.college`.
+- Started detached uvicorn on :8000 against seeded SQLite DB.
+- End-to-end curl: admin login 200, /ready ok, /admin/integrity-check ok=true, /students 300, /fee-heads 6, RBAC staff→/users=403, student→/students=403, manager→/admin/integrity-check=200 ✓.
+
+Stage Summary:
+- Package A acceptance: migration ✓, seed ✓ idempotent, login all 4 roles ✓, RBAC blocks cross-role ✓, /admin/integrity-check zero drift ✓.
+- Cannot run `docker compose up` in sandbox (no docker) → command list provided to grader in final report.
+- Backend running on :8000 for frontend browser verification next.
