@@ -98,13 +98,15 @@ async def get_outstanding(
         raise HTTPException(status_code=404, detail={"error": {"code": "not_found", "message": "student not found"}})
 
     # Derived outstanding per installment: amount − concessions − allocations
+    # Only allocations from non-reversed payments (SUCCESS, REVERSAL_REQUESTED)
+    # count; a REVERSED payment's allocations are voided.
     alloc_subq = (
         select(
             PaymentAllocation.installment_id,
             func.coalesce(func.sum(PaymentAllocation.amount), _ZERO).label("allocated"),
         )
         .join(Payment, Payment.id == PaymentAllocation.payment_id)
-        .where(Payment.status.in_([PaymentStatus.SUCCESS, PaymentStatus.REVERSAL_REQUESTED, PaymentStatus.REVERSED]))
+        .where(Payment.status.in_([PaymentStatus.SUCCESS, PaymentStatus.REVERSAL_REQUESTED]))
         .group_by(PaymentAllocation.installment_id)
         .subquery()
     )

@@ -37,13 +37,17 @@ def test_integrity_via_endpoint_admin(client: TestClient) -> None:
 
 
 def test_integrity_detects_drift_when_status_cache_corrupted(db) -> None:
-    """Tamper the installments.status cache and confirm the checker reports drift."""
+    """Tamper the installments.status cache and confirm the checker reports drift.
+
+    Restores the original cached status after asserting so subsequent tests
+    (which share the per-session temp DB) still see zero drift.
+    """
     from sqlalchemy import select, update
     from app.models.fee import Installment, InstallmentStatus
-    # Pick a PENDING or OVERDUE installment and flip its cached status to PAID.
     inst = db.execute(
         select(Installment).where(Installment.status != InstallmentStatus.PAID).limit(1)
     ).scalar_one()
+    original_status = inst.status
     db.execute(
         update(Installment).where(Installment.id == inst.id).values(status=InstallmentStatus.PAID)
     )
@@ -51,3 +55,8 @@ def test_integrity_detects_drift_when_status_cache_corrupted(db) -> None:
     report = integrity_check(db)
     assert report.ok is False
     assert any(d.installment_id == inst.id for d in report.drifts), "drift must be reported on the tampered installment"
+    # Restore so downstream tests see a clean ledger.
+    db.execute(
+        update(Installment).where(Installment.id == inst.id).values(status=original_status)
+    )
+    db.commit()

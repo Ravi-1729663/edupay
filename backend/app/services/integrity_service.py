@@ -44,10 +44,18 @@ def check(db: Session) -> IntegrityReport:
     now = datetime.now(timezone.utc)
 
     # ── 1. Per-installment derived outstanding vs cached status ──
+    # Only allocations from non-reversed payments (SUCCESS, REVERSAL_REQUESTED)
+    # count toward outstanding. A REVERSED payment's allocations are voided
+    # (the reversal restores the outstanding). This is the source of truth
+    # the integrity checker recomputes from base facts.
     alloc_subq = (
         select(
             PaymentAllocation.installment_id,
             func.coalesce(func.sum(PaymentAllocation.amount), _ZERO).label("allocated"),
+        )
+        .join(Payment, Payment.id == PaymentAllocation.payment_id)
+        .where(
+            Payment.status.in_([PaymentStatus.SUCCESS, PaymentStatus.REVERSAL_REQUESTED])
         )
         .group_by(PaymentAllocation.installment_id)
         .subquery()

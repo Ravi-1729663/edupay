@@ -54,37 +54,37 @@ def db_setup():
 
 @pytest.fixture()
 def db(db_setup):
-    """Per-test session; rolled back after each test."""
-    connection = engine.connect()
-    trans = connection.begin()
-    session = SessionLocal(bind=connection)
-    yield session
-    session.close()
-    trans.rollback()
-    connection.close()
+    """Per-test session. Tests that exercise committing service functions
+    persist to the per-session temp SQLite DB (no rollback) — this is
+    intentional so that integration assertions made via a *fresh* session
+    (e.g. after an HTTP route commits) see the committed data. Tests use
+    unique idempotency keys / gateway refs so there is no count conflict,
+    and `allocate()` refreshes installment cached statuses so the integrity
+    checker stays zero-drift across the session."""
+    session = SessionLocal()
+    try:
+        yield session
+    finally:
+        # Defensive rollback in case a test left the session in a broken
+        # state after an expected IntegrityError; harmless if there's nothing
+        # to roll back.
+        try:
+            session.rollback()
+        except Exception:
+            pass
+        session.close()
 
 
 @pytest.fixture()
 def client(db_setup):
-    """FastAPI test client with a per-test DB session override."""
-    connection = engine.connect()
-    trans = connection.begin()
-    session = SessionLocal(bind=connection)
-
-    def _override():
-        try:
-            yield session
-        finally:
-            pass
-
+    """FastAPI test client. Routes use the REAL get_db (fresh session per
+    request, commits to the per-session temp DB). Tests query via fresh
+    SessionLocal() and see committed data."""
     from app.main import app
-    app.dependency_overrides[get_db] = _override
+    # Ensure no stale override from a prior test.
+    app.dependency_overrides.pop(get_db, None)
     with TestClient(app) as c:
         yield c
-    app.dependency_overrides.clear()
-    session.close()
-    trans.rollback()
-    connection.close()
 
 
 # ── Login helpers ───────────────────────────────────────────────────

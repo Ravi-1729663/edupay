@@ -381,6 +381,149 @@ def _seed_concessions(db: Session, students: list[Student], admin_id: str) -> No
     db.flush()
 
 
+def _seed_payments_v2(db: Session, students: list[Student], admin_id: str) -> dict:
+    """Seed v2: one of each payment state + a duplicate-attempt.
+
+    Creates:
+      - 1 SUCCESS cash (counter) payment → allocated
+      - 1 SUCCESS online payment (via simulated webhook callback) → allocated
+      - 1 FAILED online payment
+      - 1 PENDING online payment (stuck — no callback)
+      - 1 UNKNOWN online payment (verify timed out)
+      - 1 DUPLICATE attempt: second call with same idempotency_key → rejected
+        (so only one record exists; the second is a no-op)
+
+    Idempotent: checks by idempotency_key.
+    """
+    from app.models.payment import (
+        Payment,
+        PaymentAllocation,
+        PaymentMethod,
+        PaymentStatus,
+    )
+    from app.services import payment_service, gateway_service
+
+    staff = db.execute(select(User).where(User.email == "staff@edupay.college")).scalar_one()
+    tuition = db.execute(select(FeeHead).where(FeeHead.code == "TUITION")).scalar_one()
+
+    def _existing(key: str) -> bool:
+        return db.execute(
+            select(Payment).where(Payment.idempotency_key == key)
+        ).scalar_one_or_none() is not None
+
+    counts = {"created": 0, "duplicate_rejected": 0}
+
+    # Pick 6 students for the 6 payment scenarios.
+    picked = students[:6]
+
+    def _installment_for(student_id: str):
+        return db.execute(
+            select(Installment)
+            .join(StudentFeeAssignment, StudentFeeAssignment.id == Installment.student_fee_assignment_id)
+            .where(StudentFeeAssignment.student_id == student_id)
+            .order_by(Installment.due_date, Installment.installment_number)
+            .limit(1)
+        ).scalar_one()
+
+    # 1. SUCCESS cash counter payment for student[0]
+    key = "seed-cash-success"
+    if not _existing(key):
+        p = payment_service.create_counter_payment(
+            db,
+            student_id=picked[0].id,
+            amount=Decimal("1000.00"),
+            method=PaymentMethod.CASH,
+            idempotency_key=key,
+            initiated_by=staff.id,
+        )
+        counts["created"] += 1
+
+    # 2. SUCCESS online payment for student[1] — simulate the gateway callback.
+    key = "seed-online-success"
+    if not _existing(key):
+        p, gref, _ = payment_service.initiate_online_payment(
+            db,
+            student_id=picked[1].id,
+            amount=Decimal("2000.00"),
+            idempotency_key=key,
+            initiated_by=staff.id,
+        )
+        # Record the true outcome + apply the webhook synchronously.
+        gateway_service.record_true_outcome(gref, "SUCCESS")
+        payment_service.apply_webhook_callback(
+            db, gref, PaymentStatus.SUCCESS, Decimal("2000.00"), actor_id=staff.id
+        )
+        counts["created"] += 1
+
+    # 3. FAILED online payment for student[2]
+    key = "seed-online-failed"
+    if not _existing(key):
+        p, gref, _ = payment_service.initiate_online_payment(
+            db,
+            student_id=picked[2].id,
+            amount=Decimal("3000.00"),
+            idempotency_key=key,
+            initiated_by=staff.id,
+        )
+        gateway_service.record_true_outcome(gref, "FAILED")
+        payment_service.apply_webhook_callback(
+            db, gref, PaymentStatus.FAILED, Decimal("3000.00"), actor_id=staff.id
+        )
+        counts["created"] += 1
+
+    # 4. PENDING online payment (stuck — no callback ever fires)
+    key = "seed-online-pending"
+    if not _existing(key):
+        p, gref, _ = payment_service.initiate_online_payment(
+            db,
+            student_id=picked[3].id,
+            amount=Decimal("4000.00"),
+            idempotency_key=key,
+            initiated_by=staff.id,
+        )
+        # Do NOT record an outcome; do NOT fire a callback. Stays PENDING.
+        counts["created"] += 1
+
+    # 5. UNKNOWN online payment (verify timed out)
+    key = "seed-online-unknown"
+    if not _existing(key):
+        p, gref, _ = payment_service.initiate_online_payment(
+            db,
+            student_id=picked[4].id,
+            amount=Decimal("5000.00"),
+            idempotency_key=key,
+            initiated_by=staff.id,
+        )
+        gateway_service.record_true_outcome(gref, "SUCCESS")  # truth: succeeded
+        # Verify → PENDING becomes UNKNOWN (we don't resolve here; tests will).
+        payment_service.verify_payment(db, p.id, staff.id)
+        counts["created"] += 1
+
+    # 6. DUPLICATE attempt: try to initiate with the same idempotency_key as #1.
+    key = "seed-cash-success"
+    try:
+        payment_service.create_counter_payment(
+            db,
+            student_id=picked[5].id,
+            amount=Decimal("99999.00"),
+            method=PaymentMethod.CASH,
+            idempotency_key=key,
+            initiated_by=staff.id,
+        )
+    except payment_service.IdempotencyConflict:
+        counts["duplicate_rejected"] += 1
+        db.rollback()
+
+    db.commit()
+    # Recompute installment statuses for the seeded payments.
+    for s in picked[:3]:  # only the first 3 (SUCCESS ones) have allocations
+        inst = _installment_for(s.id)
+        if inst:
+            payment_service._refresh_installment_status(db, inst)
+    db.commit()
+    return counts
+
+
 def run(reset: bool = False) -> None:
     from app.core.logging import setup_logging
     setup_logging("INFO")
@@ -405,9 +548,11 @@ def run(reset: bool = False) -> None:
         structure_ids = _seed_fee_structures(db, program_ids, head_ids, admin_id)
         _, students = _seed_students(db, program_ids, head_ids, structure_ids, admin_id, n=300)
         _seed_concessions(db, students, admin_id)
+        payments_v2 = _seed_payments_v2(db, students, admin_id)
 
         db.commit()
         # Final counts for the log line
+        from app.models.payment import Payment, PaymentStatus as PS
         counts = {
             "users": db.execute(select(User)).scalars().all().__len__(),
             "students": db.execute(select(Student)).scalars().all().__len__(),
@@ -418,6 +563,12 @@ def run(reset: bool = False) -> None:
             "concessions_pending": db.execute(
                 select(Concession).where(Concession.status == ConcessionStatus.PENDING)
             ).scalars().all().__len__(),
+            "payments_total": db.execute(select(Payment)).scalars().all().__len__(),
+            "payments_success": db.execute(select(Payment).where(Payment.status == PS.SUCCESS)).scalars().all().__len__(),
+            "payments_failed": db.execute(select(Payment).where(Payment.status == PS.FAILED)).scalars().all().__len__(),
+            "payments_pending": db.execute(select(Payment).where(Payment.status == PS.PENDING)).scalars().all().__len__(),
+            "payments_unknown": db.execute(select(Payment).where(Payment.status == PS.UNKNOWN)).scalars().all().__len__(),
+            "payments_v2": payments_v2,
         }
         log.info("seed.done", extra={"counts": counts})
         print("SEED COMPLETE:", counts)
