@@ -1,282 +1,140 @@
-# EduPay — Final Assessment Submission Report
+# Edumerge Product Engineering Assessment — Submission Report
+## Assignment 2: Fee Collection & Reconciliation System (EduPay)
 
-## Executive Summary
+---
 
-**Status: Implementation complete and validated against the included automated test suite.**
+## 1. Working Solution / Prototype
 
-EduPay is a production-oriented student fee collection and reconciliation platform developed for **Edumerge Product Engineering Assessment — Assignment 2**.
+EduPay is a production-ready student fee collection, payment processing, and automated reconciliation system built for higher education institutions (≈5,000 students, 200 staff).
 
-The system addresses fee obligations, multiple fee heads, concessions, installments, payments, payment failures, duplicate callbacks, reversals, outstanding balances, reconciliation exceptions, auditability, role-based access control, and financial integrity.
+### System Roles & Capabilities:
+- **ADMIN**: System administration, user RBAC management, integrity checker, audit log inspector, chaos gateway simulator.
+- **FINANCE_MANAGER**: Executive financial dashboard, reconciliation exceptions classifier, reversal approval, audit log reviewer.
+- **FINANCE_STAFF**: Student fee account lookup, counter payment processing (Cash/Cheque), payment history records.
+- **STUDENT**: Personal fee schedule, installment breakdown, payment history.
 
-### Validation Summary
+### Quickstart Execution Commands:
 
-* **Backend:** 50/50 Pytest tests passing
-* **Frontend:** Next.js 16 + TypeScript + Tailwind CSS build completed successfully
-* **Financial integrity:** Integrity checker passes against seeded data
-* **Database:** PostgreSQL 16 with `NUMERIC(12,2)` monetary fields
-* **Concurrency:** Duplicate webhook handling validated with concurrent test execution
-* **Reconciliation:** CSV-based settlement classification implemented
-* **RBAC:** ADMIN, FINANCE_MANAGER, FINANCE_STAFF, and STUDENT roles
-* **Local execution:** Windows PowerShell, Linux/macOS Bash, and Docker Compose launchers included
-
-## 1. Working Solution
-
-EduPay provides four role-specific experiences:
-
-| Role            | Primary Capabilities                                                           |
-| --------------- | ------------------------------------------------------------------------------ |
-| ADMIN           | System administration, RBAC, integrity checker, audit logs, gateway simulation |
-| FINANCE_MANAGER | Financial dashboard, reconciliation, reversal approval, audit review           |
-| FINANCE_STAFF   | Student fee lookup, counter payments, payment records                          |
-| STUDENT         | Fee breakdown, installment schedule, payment history                           |
-
-### Quickstart
-
-**Windows PowerShell**
-
+#### Windows (PowerShell):
 ```powershell
 .\start-local.ps1
 ```
 
-**Linux/macOS**
-
+#### Linux / macOS (Bash):
 ```bash
 chmod +x start-local.sh
 ./start-local.sh
 ```
 
-**Dockerized evaluation environment**
-
+#### Docker Compose (Production Setup):
 ```bash
 docker compose up --build
 ```
 
-### Local Endpoints
+### Endpoints & Demo Credentials (Password: `Password123!`):
+- **Frontend SPA**: [http://localhost:3000](http://localhost:3000)
+- **Backend API Docs**: [http://localhost:8000/docs](http://localhost:8000/docs)
+- **Admin Login**: `admin@edupay.college`
+- **Finance Manager Login**: `manager@edupay.college`
+- **Finance Staff Login**: `staff@edupay.college`
+- **Student Login**: `student@edupay.college`
 
-* Frontend: `http://localhost:3000`
-* Backend Swagger: `http://localhost:8000/docs`
+---
 
-Demo credentials are documented in the repository README.
+## 2. Source Code / Repository Structure
 
-## 2. Architecture
-
-EduPay uses a **modular monolith** architecture:
-
-```text
-Next.js 16 Frontend
-        │
-        │ REST API
-        ▼
-FastAPI Backend
-        │
- ┌──────┼─────────────────────┐
- │      │          │           │
-Auth  Payment   Recon       Integrity
- │      │          │           │
- └──────┴──────────┴───────────┘
-                │
-                ▼
-          PostgreSQL 16
-```
-
-The backend separates API, schema, persistence, and domain-service responsibilities while avoiding unnecessary distributed-system complexity for the assessment scope.
-
-## 3. Financial Model
-
-Financial truth is derived from authoritative records rather than maintained as a mutable balance field.
-
-Conceptually:
-
-**Outstanding Balance = Fee Obligations − Approved Concessions − Successful Allocations + Applicable Reversal Effects**
-
-Monetary values use:
-
-* Python `Decimal`
-* PostgreSQL `NUMERIC(12,2)`
-
-IEEE-754 floating-point arithmetic is not used for financial calculations.
-
-Successful financial transactions are immutable. Corrections are represented through linked reversal records rather than modifying or deleting the original successful transaction.
-
-## 4. Payment Lifecycle
-
-The system explicitly models payment states and validates state transitions.
-
-The mock gateway supports controlled failure scenarios including:
-
-* SUCCESS
-* FAILED
-* TIMEOUT / NO CALLBACK
-* DUPLICATE CALLBACK
-* LATE CALLBACK
-
-This makes asynchronous payment behaviour demonstrable without depending on an external payment provider.
-
-Idempotency is enforced at the database layer rather than relying solely on an application-level existence check.
-
-## 5. Payment Allocation
-
-Payments are allocated using a deterministic strategy:
-
-1. Oldest due unpaid installment first
-2. Fee-head priority as the tie-breaker
-3. Partial allocations supported
-4. Over-allocation prevented
-
-Allocation records preserve the relationship between a payment and the underlying fee obligation.
-
-## 6. Reconciliation
-
-Finance managers can upload settlement data and compare external settlement records against internal successful payments.
-
-The reconciliation engine identifies:
-
-1. `MATCHED`
-2. `AMOUNT_MISMATCH`
-3. `MISSING_INTERNAL`
-4. `MISSING_EXTERNAL`
-5. `DUPLICATE`
-
-Exceptions are classified for review rather than silently modifying financial records.
-
-A reconciliation mismatch therefore does **not** automatically change the internal financial truth.
-
-## 7. Financial Integrity & Concurrency
-
-Important validation scenarios include:
-
-### Duplicate webhook race
-
-Two identical callbacks arriving concurrently must not create two financial transactions.
-
-The implementation combines:
-
-* Database uniqueness constraints
-* Transaction boundaries
-* Row-level locking where applicable
-* Concurrent test execution
-
-### Reversal protection
-
-The system prevents:
-
-* Reversing more than the original payment amount
-* Reversing an already reversed payment
-* Invalid state transitions
-* Unauthorized reversal approval
-
-### Integrity Checker
-
-The integrity checker validates financial invariants including:
-
-* Allocation does not exceed payment amount
-* Allocation does not exceed the applicable obligation
-* Reversal does not exceed the reversible amount
-* Payment state transitions remain valid
-* Duplicate external references are prevented
-* Derived balances remain internally consistent
-
-## 8. Auditability
-
-Meaningful financial actions and state changes are recorded with audit information such as:
-
-* Actor
-* Action
-* Entity
-* Timestamp
-* Previous state
-* New state
-* Relevant metadata
-
-This allows financial operations to be investigated without relying exclusively on mutable application records.
-
-## 9. Engineering Trade-offs
-
-### PostgreSQL + SQLite
-
-PostgreSQL is the authoritative production/evaluation database because the financial integrity and concurrency model relies on PostgreSQL transaction semantics.
-
-SQLite support is provided for lightweight local development where appropriate.
-
-Concurrency-specific guarantees are validated against PostgreSQL.
-
-### Synchronous reconciliation
-
-Reconciliation is intentionally synchronous for the assessment scope. This provides immediate feedback to finance users while avoiding unnecessary worker infrastructure.
-
-### Custom dashboard visualizations
-
-Simple CSS-based analytics components are used instead of introducing a heavyweight charting dependency for a relatively small dashboard.
-
-## 10. Repository Structure
+- **Backend (`/backend`)**: FastAPI (Python 3.12), SQLAlchemy 2.0 ORM, Alembic schema migrations, PostgreSQL (`NUMERIC(12,2)` money types with SQLite local fallback), Pydantic v2 schemas.
+- **Frontend (`/src`)**: Next.js 16 (App Router), TypeScript, Tailwind CSS v4, shadcn/ui primitives, Sonner notifications, Framer Motion transitions.
+- **Documentation (`/docs`)**: Frozen brief (`SPEC.md`), architectural decisions (`DECISIONS.md`), data model rationale (`DATA_MODEL.md`), complete REST API dictionary (`API.md`).
 
 ```text
-backend/
-├── alembic/
-└── app/
-    ├── api/
-    ├── core/
-    ├── db/
-    ├── models/
-    ├── schemas/
-    ├── services/
-    └── tests/
-
-src/
-├── app/
-├── components/edupay/
-└── lib/
-
-docs/
-├── SPEC.md
-├── DECISIONS.md
-├── DATA_MODEL.md
-└── API.md
-
-docker-compose.yml
-start-local.ps1
-start-local.sh
-run-tests.ps1
-run-tests.sh
+Project Root/
+├── backend/                  # FastAPI Application & Alembic Migrations
+│   ├── app/
+│   │   ├── api/              # REST Endpoints (Auth, Students, Payments, Recon, Admin, Chaos)
+│   │   ├── core/             # JWT Security & Config Settings
+│   │   ├── db/               # Session Factory & Idempotent Seed Engine
+│   │   ├── models/           # SQLAlchemy 2.0 Models (NUMERIC 12,2 Money Types)
+│   │   ├── schemas/          # Pydantic v2 Request/Response Models
+│   │   ├── services/         # Domain Logic (Payment Engine, Recon Engine, Integrity Checker)
+│   │   └── tests/            # Pytest Suite (50 Integration/Unit Tests)
+├── src/                      # Next.js 16 Frontend SPA (App Router)
+├── docs/                     # Source of Truth Documentation (SPEC, DECISIONS, DATA_MODEL, API)
+├── docker-compose.yml        # PostgreSQL 16 + FastAPI + Next.js Container Stack
+├── start-local.ps1 / .sh     # One-Click Local Launchers
+└── run-tests.ps1 / .sh       # Test Suite Launchers
 ```
 
-## 11. AI Usage
+---
 
-AI-assisted development was used as permitted by the assessment instructions.
+## 3. Brief Explanation of Approach, Assumptions, Architecture, and Trade-offs
 
-AI was primarily used for:
+### Architectural Approach
+- **Modular Monolith**: Structured backend and Next.js SPA. Ensures low operational complexity for a college environment while maintaining clean domain boundaries.
+- **Derived Financial Truth**: Outstanding balance is **never stored as a mutable database column**. It is dynamically computed:
+  $$\text{Outstanding Balance} = \text{Invoiced} - \text{Concessions} - \text{Allocations}$$
+  The cached `installments.status` is dynamically verified by the backend Integrity Auditor.
+- **Immutable Financial Ledger**: Settled payments (`SUCCESS`) are strictly immutable. Corrections require a linked `Reversal` entity approved by a Finance Manager.
 
-* Initial architecture and implementation assistance
-* Backend domain services
-* Frontend component generation
-* Database migrations
-* Validation schemas
-* Test scaffolding
-* Local launcher scripts
+### Core Assumptions
+1. **Dunning Allocation Strategy**: Payments allocate funds to the **oldest-due unpaid installment first**, breaking ties via fee-head priority. Partial allocations are supported.
+2. **Synchronous Reconciliation**: Reconciliation CSV files are parsed and classified synchronously upon upload for immediate manager visibility.
 
-Generated code was manually inspected, executed, tested, and corrected where required.
+### Key Trade-offs
+- **PostgreSQL vs. SQLite Fallback**: Production runs against PostgreSQL 16 via Docker Compose. For zero-dependency local evaluation, SQLite is supported seamlessly without code changes.
+- **Custom CSS Analytics vs. Charting Libraries**: Built custom CSS analytics bars for fast page rendering and zero bundle bloat.
 
-One concrete issue identified during validation was an Alembic path-resolution error when tests were executed from the repository root. The initial relative migration path failed outside the backend working directory.
+---
 
-The issue was identified through actual test execution and corrected by resolving the Alembic script location from the test configuration's absolute filesystem path.
+## 4. Validation and Important Edge Cases
 
-The final test suite was then rerun successfully.
+1. **Concurrent Gateway Webhooks**:
+   - Database row locking (`SELECT ... FOR UPDATE`) and database-level `UNIQUE` constraints on `gateway_ref` prevent double-charging. Verified via multi-threaded race condition tests (`test_payments.py`).
 
-## 12. Validation Philosophy
+2. **Reversal Over-Refunding Protection**:
+   - State transition rules enforce `SUCCESS → REVERSAL_REQUESTED → REVERSED`. Reversal amounts cannot exceed original payment amounts or be executed twice.
 
-The implementation was validated through execution rather than relying solely on generated code inspection.
+3. **Reconciliation Exceptions Categorization**:
+   - Classifies statement CSV rows into 5 mutually exclusive states:
+     1. `MATCHED`: Internal record & bank statement match.
+     2. `AMOUNT_MISMATCH`: Gateway reference matches, amount differs (flagged for review, never auto-adjusted).
+     3. `MISSING_INTERNAL`: Bank reports payment, backend has no internal record.
+     4. `MISSING_EXTERNAL`: Internal database has `SUCCESS` payment, but missing from bank statement.
+     5. `DUPLICATE`: Same external reference settling multiple times.
 
-Particular attention was given to:
+4. **Zero Float Drift**:
+   - Python `Decimal` and SQL `NUMERIC(12,2)` used across the application stack. IEEE 754 floating-point math is forbidden.
 
-* Database constraints
-* Financial arithmetic
-* State transitions
-* Idempotency
-* Concurrent callbacks
-* Authorization
-* Reconciliation classification
-* Reversal rules
-* Migration execution
-* Cross-platform startup
+---
 
-The objective was not simply to build screens that record payments, but to model the financial lifecycle and failure scenarios that make fee collection systems difficult to implement reliably.
+## 5. Mandatory AI / Tool Usage Report
+
+**AI TOOL USED:** Gemini 3.6 Flash (Antigravity Senior Engineering Assistant)
+
+**WHAT I ASKED AI TO DO:**
+1. Architect and implement a financial-grade college fee collection, payment state machine, and automated reconciliation backend (FastAPI + SQLAlchemy 2 + Alembic + Postgres).
+2. Create a responsive, 10-screen role-aware Next.js 16 frontend with Tailwind CSS and shadcn/ui matching strict financial UI standards and dark/emerald aesthetic.
+3. Build a 50-test Pytest validation suite and cross-platform one-click launcher scripts for evaluation.
+
+**PROMPT THAT WAS MOST USEFUL:**
+> "Act as Senior Developer. Make this production level, make it local run to share with hiring person, human made and well-arranged runnable solution with strong financial integrity, audit trails, and zero drift."
+
+**CODE GENERATED BY AI: What part?**
+- Backend domain services (`payment_service.py`, `reconciliation_service.py`, `integrity_service.py`, `gateway_service.py`).
+- Next.js frontend dashboard components (`finance-dashboard.tsx`, `payment-details.tsx`, `reconciliation-exceptions.tsx`, `student-fee-account.tsx`, `nav.tsx`, `chaos-panel.tsx`).
+- Database migrations and Pydantic validation schemas.
+- Local launcher scripts (`start-local.ps1`, `start-local.sh`, `run-tests.ps1`, `run-tests.sh`).
+
+**CODE I MODIFIED: What part?**
+- `conftest.py`: Updated Alembic configuration to dynamically resolve absolute script locations across different shell working directories.
+- `package.json`: Converted Unix-specific `cp` build commands into cross-platform Node.js `fs.cpSync` calls for Windows compatibility.
+- `api.ts`: Added Next.js server proxy routing to eliminate browser CORS preflight restrictions during local testing.
+
+**AI OUTPUT THAT WAS WRONG:**
+Initial Alembic migration test fixture in `conftest.py` used relative pathing `script_location = alembic`, causing `alembic.util.exc.CommandError` when pytest was executed outside the `backend/` directory.
+
+**HOW I IDENTIFIED THE PROBLEM:**
+Ran `pytest backend/app/tests` from the repository root directory and observed 50 test setup errors failing on `CommandError: Path doesn't exist: alembic`.
+
+**HOW I FIXED IT:**
+Modified `conftest.py` to derive `backend_dir = Path(__file__).resolve().parent.parent.parent` and explicitly set `cfg.set_main_option("script_location", str(backend_dir / "alembic"))`. Re-ran pytest and verified all 50 tests passed cleanly.
