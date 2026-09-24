@@ -5,7 +5,14 @@ import { toast } from "sonner";
 import { GraduationCap, Loader2, LogIn } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ApiError, apiFetch, setToken, type TokenResponse, type User } from "@/lib/api";
@@ -16,6 +23,79 @@ const DEMO_LOGINS: { role: string; email: string; password: string }[] = [
   { role: "Finance Staff", email: "staff@edupay.college", password: "Password123!" },
   { role: "Student", email: "student@edupay.college", password: "Password123!" },
 ];
+
+/** Pings /health on the backend via the proxy; shows green/red dot. */
+function BackendStatus() {
+  const [state, setState] = React.useState<
+    "checking" | "ok" | "down"
+  >("checking");
+  const [msg, setMsg] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    setState("checking");
+    setMsg(null);
+    fetch("/api/edupay/health", { cache: "no-store" })
+      .then(async (r) => {
+        if (cancelled) return;
+        if (r.ok) {
+          // Validate the body shape — backend should say {"status":"ok"}.
+          try {
+            const body = await r.json();
+            if (body?.status === "ok") {
+              setState("ok");
+            } else {
+              setState("down");
+              setMsg("unexpected body");
+            }
+          } catch {
+            // Empty body but 2xx — assume ok.
+            setState("ok");
+          }
+        } else {
+          setState("down");
+          setMsg(
+            r.status >= 500
+              ? "backend not running on :8000"
+              : `HTTP ${r.status}`,
+          );
+        }
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        setState("down");
+        setMsg(e instanceof Error ? e.message : "network error");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return (
+    <div className="flex items-center gap-1.5 text-[11px] text-slate-500">
+      <span
+        className={
+          "size-2 rounded-full inline-block " +
+          (state === "checking"
+            ? "bg-slate-300 animate-pulse"
+            : state === "ok"
+              ? "bg-emerald-500"
+              : "bg-rose-500")
+        }
+        aria-label={`backend ${state}`}
+      />
+      <span className="font-mono">
+        backend{" "}
+        {state === "checking"
+          ? "checking…"
+          : state === "ok"
+            ? "online"
+            : "offline"}
+      </span>
+      {msg ? <span className="text-rose-600"> · {msg}</span> : null}
+    </div>
+  );
+}
 
 export function LoginCard({ onSignedIn }: { onSignedIn: (u: User) => void }) {
   const [email, setEmail] = React.useState("");
@@ -60,6 +140,7 @@ export function LoginCard({ onSignedIn }: { onSignedIn: (u: User) => void }) {
           <CardDescription>
             College fee collection system. Sign in to continue.
           </CardDescription>
+          <BackendStatus />
         </CardHeader>
         <form onSubmit={submit}>
           <CardContent className="space-y-4">

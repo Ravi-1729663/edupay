@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { HelpCircle } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import type { Role } from "@/lib/api";
@@ -30,6 +31,71 @@ export function StatusBadge({
     PENDING_APPROVAL: "border-amber-400 text-amber-800 bg-amber-50",
     APPROVED: "border-emerald-500 text-emerald-800 bg-emerald-50",
     REJECTED: "border-red-500 text-red-700 bg-red-50",
+  };
+  return (
+    <Badge variant="outline" className={cn(map[s] ?? "", className)}>
+      {s}
+    </Badge>
+  );
+}
+
+/**
+ * Payment status badges (per brief):
+ *   SUCCESS=emerald, FAILED=red, PENDING=amber, UNKNOWN=amber+?,
+ *   REVERSAL_REQUESTED=amber, REVERSED=slate (struck-through),
+ *   CREATED=slate.
+ */
+export function PaymentStatusBadge({
+  status,
+  className,
+}: {
+  status: string;
+  className?: string;
+}) {
+  const s = (status ?? "").toUpperCase();
+  const map: Record<string, string> = {
+    CREATED: "border-slate-300 text-slate-600 bg-slate-50",
+    PENDING: "border-amber-400 text-amber-800 bg-amber-50",
+    SUCCESS: "border-emerald-500 text-emerald-800 bg-emerald-50",
+    FAILED: "border-red-500 text-red-700 bg-red-50",
+    UNKNOWN: "border-amber-500 text-amber-900 bg-amber-100",
+    REVERSAL_REQUESTED: "border-amber-400 text-amber-800 bg-amber-50",
+    REVERSED: "border-slate-400 text-slate-500 bg-slate-50 line-through",
+  };
+  if (s === "UNKNOWN") {
+    return (
+      <Badge variant="outline" className={cn(map[s], className, "gap-1")}>
+        <HelpCircle className="size-3" />
+        {s}
+      </Badge>
+    );
+  }
+  return (
+    <Badge variant="outline" className={cn(map[s] ?? "", className)}>
+      {s}
+    </Badge>
+  );
+}
+
+/**
+ * Reconciliation classification badges (per brief):
+ *   MATCHED=emerald, AMOUNT_MISMATCH=amber,
+ *   MISSING_INTERNAL=red, MISSING_EXTERNAL=red, DUPLICATE=red.
+ */
+export function ReconClassBadge({
+  classification,
+  className,
+}: {
+  classification: string;
+  className?: string;
+}) {
+  const s = (classification ?? "").toUpperCase();
+  const map: Record<string, string> = {
+    MATCHED: "border-emerald-500 text-emerald-800 bg-emerald-50",
+    AMOUNT_MISMATCH: "border-amber-400 text-amber-800 bg-amber-50",
+    MISSING_INTERNAL: "border-red-500 text-red-700 bg-red-50",
+    MISSING_EXTERNAL: "border-red-500 text-red-700 bg-red-50",
+    DUPLICATE: "border-red-500 text-red-700 bg-red-50",
   };
   return (
     <Badge variant="outline" className={cn(map[s] ?? "", className)}>

@@ -68,10 +68,20 @@ function parseErrorEnvelope(data: any): {
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const token =
     typeof window !== "undefined" ? localStorage.getItem("edupay_token") : null;
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-    ...((init?.headers as Record<string, string>) ?? {}),
-  };
+  const callerHeaders: Record<string, string> =
+    (init?.headers as Record<string, string>) ?? {};
+  const headers: Record<string, string> = { ...callerHeaders };
+  // Only set Content-Type=application/json if caller didn't supply one and
+  // the body isn't a FormData (which needs the browser to set the multipart
+  // boundary).
+  const hasContentType = Object.keys(headers).some(
+    (k) => k.toLowerCase() === "content-type",
+  );
+  const isFormData =
+    typeof FormData !== "undefined" && init?.body instanceof FormData;
+  if (!hasContentType && !isFormData) {
+    headers["Content-Type"] = "application/json";
+  }
   if (token) headers["Authorization"] = "Bearer " + token;
 
   const res = await fetch(apiUrl(path), { ...init, headers });
@@ -196,6 +206,202 @@ export interface AuditLog {
 
 export interface AuditPage {
   items: AuditLog[];
+  total?: number;
   limit: number;
   offset: number;
+}
+
+// ── Catalog (departments / programs / fee heads / fee structures) ──
+
+export interface Department {
+  id: string;
+  code: string;
+  name: string;
+}
+
+export interface Program {
+  id: string;
+  code: string;
+  name: string;
+  department_id: string;
+  duration_years: number;
+}
+
+export interface FeeHead {
+  id: string;
+  code: string;
+  name: string;
+  description?: string | null;
+  priority: number;
+  is_refundable: boolean;
+}
+
+export interface FeeStructureLine {
+  id: string;
+  fee_head_id: string;
+  amount: string;
+}
+
+export interface FeeStructure {
+  id: string;
+  program_id: string;
+  academic_year: string;
+  effective_from: string | null;
+  effective_to: string | null;
+  is_active: boolean;
+  lines: FeeStructureLine[];
+}
+
+// ── Payments ────────────────────────────────────────────────────────
+
+export type PaymentStatus =
+  | "CREATED"
+  | "PENDING"
+  | "SUCCESS"
+  | "FAILED"
+  | "UNKNOWN"
+  | "REVERSAL_REQUESTED"
+  | "REVERSED";
+
+export type PaymentMethod = "CASH" | "CHEQUE" | "ONLINE";
+
+export interface Payment {
+  id: string;
+  student_id: string;
+  payer_user_id?: string | null;
+  amount: string;
+  method: PaymentMethod;
+  gateway_ref?: string | null;
+  status: PaymentStatus;
+  idempotency_key?: string | null;
+  initiated_by?: string | null;
+  callback_received_at?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Allocation {
+  id: string;
+  payment_id: string;
+  installment_id: string;
+  fee_head_id: string;
+  amount: string;
+  created_at?: string;
+}
+
+export type ReversalStatus = "REQUESTED" | "COMPLETED";
+
+export interface Reversal {
+  id: string;
+  original_payment_id: string;
+  amount: string;
+  reason: string;
+  status: ReversalStatus;
+  requested_by?: string | null;
+  completed_at?: string | null;
+  created_at: string;
+}
+
+export interface PaymentDetail {
+  payment: Payment;
+  allocations: Allocation[];
+  reversals: Reversal[];
+}
+
+export interface PaymentPage {
+  items: Payment[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface PaymentVerifyResponse {
+  payment_id: string;
+  status: PaymentStatus;
+  message?: string | null;
+}
+
+export interface PaymentInitiateResponse {
+  payment_id: string;
+  gateway_ref: string;
+  redirect_url: string;
+  status: PaymentStatus;
+}
+
+export interface PaymentCounterResponse {
+  payment: Payment;
+  allocations: Allocation[];
+  reversals: Reversal[];
+}
+
+// ── Reconciliation ──────────────────────────────────────────────────
+
+export type ReconClassification =
+  | "MATCHED"
+  | "AMOUNT_MISMATCH"
+  | "MISSING_INTERNAL"
+  | "MISSING_EXTERNAL"
+  | "DUPLICATE";
+
+export interface ReconBatch {
+  id: string;
+  uploaded_by?: string | null;
+  source_file_name: string;
+  total_lines: number;
+  matched_count: number;
+  amount_mismatch_count: number;
+  missing_internal_count: number;
+  missing_external_count: number;
+  duplicate_count: number;
+  created_at: string;
+}
+
+export interface ReconBatchPage {
+  items: ReconBatch[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface ReconLine {
+  id: string;
+  batch_id: string;
+  external_reference: string;
+  external_amount: string;
+  student_id?: string | null;
+  payment_id?: string | null;
+  classification: ReconClassification;
+  suggested_payment_id?: string | null;
+  notes?: string | null;
+  resolved_classification?: ReconClassification | null;
+  resolved_by?: string | null;
+  resolved_at?: string | null;
+  resolution_notes?: string | null;
+  created_at: string;
+}
+
+export interface ReconLinePage {
+  items: ReconLine[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface ReconUploadResponse {
+  batch: ReconBatch;
+  lines: ReconLine[];
+}
+
+// ── Mock Gateway chaos ──────────────────────────────────────────────
+
+export type ChaosMode =
+  | "SUCCESS"
+  | "FAILED"
+  | "TIMEOUT_NO_CALLBACK"
+  | "DUPLICATE_CALLBACK"
+  | "LATE_CALLBACK";
+
+export interface ChaosSetting {
+  mode: ChaosMode;
+  delay_seconds: number;
 }
