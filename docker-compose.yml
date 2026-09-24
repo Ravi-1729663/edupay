@@ -1,0 +1,55 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: edupay
+      POSTGRES_PASSWORD: edupay
+      POSTGRES_DB: edupay
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U edupay -d edupay"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL: postgresql+psycopg2://edupay:edupay@postgres:5432/edupay
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-prod-please-use-a-long-random-string}
+      JWT_ALGORITHM: HS256
+      JWT_EXPIRE_MINUTES: 60
+      ENV: production
+      LOG_LEVEL: INFO
+      CORS_ORIGINS: http://localhost:3000
+      MOCK_GATEWAY_URL: http://localhost:8000
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    command: >
+      sh -c "alembic upgrade head &&
+             python -m app.db.seed &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8000"
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      NEXT_PUBLIC_API_BASE: http://localhost:8000
+    depends_on:
+      - backend
+    ports:
+      - "3000:3000"
+    command: >
+      sh -c "bun run db:push || true && bun run dev"
+
+volumes:
+  pgdata:

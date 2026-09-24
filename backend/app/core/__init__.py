@@ -1,0 +1,1 @@
+"""EduPay core package."""

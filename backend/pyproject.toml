@@ -1,0 +1,33 @@
+[project]
+name = "edupay-backend"
+version = "0.1.0"
+description = "EduPay — Fee Collection & Reconciliation backend (FastAPI + SQLAlchemy + Alembic + Postgres)"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi==0.128.0",
+    "uvicorn[standard]==0.32.0",
+    "sqlalchemy==2.0.36",
+    "alembic==1.14.0",
+    "pydantic==2.12.5",
+    "pydantic-settings==2.6.4",
+    "python-jose[cryptography]==3.3.0",
+    "passlib[bcrypt]==1.7.4",
+    "bcrypt==4.2.0",
+    "psycopg2-binary==2.9.10",
+    "python-multipart==0.0.20",
+    "email-validator==2.2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==9.0.2",
+    "httpx==0.28.1",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["app/tests"]
+addopts = "-q"
+
+[tool.setuptools]
+packages = ["app"]
