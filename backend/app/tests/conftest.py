@@ -38,7 +38,9 @@ import app.models  # noqa: E402,F401  register all tables
 def db_setup():
     """Run the migration + seed once per session."""
     # Use Alembic to create the schema (exercises the migration).
-    cfg = Config(str(Path(__file__).resolve().parent.parent.parent / "alembic.ini"))
+    backend_dir = Path(__file__).resolve().parent.parent.parent
+    cfg = Config(str(backend_dir / "alembic.ini"))
+    cfg.set_main_option("script_location", str(backend_dir / "alembic"))
     cfg.set_main_option("sqlalchemy.url", f"sqlite:///{_TMP.name}")
     command.upgrade(cfg, "head")
     # Seed.

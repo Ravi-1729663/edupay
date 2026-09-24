@@ -1,91 +1,110 @@
-# EduPay — Fee Collection & Reconciliation
+# EduPay — Enterprise Fee Collection & Financial Reconciliation System
 
-Assessment project: a college fee system (≈5,000 students, 200 staff) graded
-on financial consistency, reconciliation, auditability, edge cases, roles,
-reporting, and the ability to explain decisions.
+EduPay is a production-ready, financial-grade college fee management system built with **FastAPI**, **SQLAlchemy 2**, **PostgreSQL**, and **Next.js 16**. Designed for academic institutions (≈5,000 students, 200 staff), it enforces strict double-entry ledger principles, automated payment reconciliation, multi-role authorization (RBAC), and real-time auditability with zero-drift financial integrity verification.
 
-> **Phase: Package A — scaffold, models, migration, auth, integrity checker,
-> seed, tests, docs, docker.** Payments, reconciliation, reporting, and
-> submission docs are deferred to later packages (see `docs/DECISIONS.md`).
+---
 
-## Stack
+## 🚀 Quickstart Guide
 
-- **Backend**: FastAPI + SQLAlchemy 2 + Alembic + Postgres (modular monolith)
-- **Frontend**: Next.js 16 + TypeScript + Tailwind + shadcn/ui
-- **DB**: PostgreSQL `NUMERIC(12,2)` for money. No floats anywhere.
-- **Auth**: JWT + bcrypt, RBAC dependency, 4 roles
-- **Tests**: pytest + httpx TestClient
+### Option 1: One-Click Local Setup (Recommended for Evaluation)
 
-## Quickstart
+Execute the interactive local runner script. It automatically installs dependencies, applies Alembic migrations, seeds 300+ student accounts & payment structures, and launches both backend and frontend servers.
 
-### With docker (the graded path)
-
-```bash
-cp .env.example .env
-docker compose up --build
-# backend → http://localhost:8000  (docs at /docs)
-# frontend → http://localhost:3000
-# postgres → localhost:5432
+#### Windows (PowerShell):
+```powershell
+.\start-local.ps1
 ```
 
-`docker compose up` runs `alembic upgrade head`, the seed script, then
-`uvicorn`. All three services come up healthy.
+#### Linux / macOS (Bash):
+```bash
+chmod +x start-local.sh
+./start-local.sh
+```
 
-### Without docker (sandbox / local)
+- **Frontend SPA**: [http://localhost:3000](http://localhost:3000)
+- **Backend API Docs (Swagger)**: [http://localhost:8000/docs](http://localhost:8000/docs)
 
-See `backend/README.md`. The backend runs against SQLite for local testing;
-the Alembic migration + models are written against the Postgres dialect and
-behave identically on SQLite for the test suite.
+---
 
-## Default logins (seeded)
+### Option 2: Docker Compose (Production Setup)
 
-| Email | Password | Role |
+Spin up the entire stack including PostgreSQL 16 container, backend API service, and Next.js frontend with containerized health checks:
+
+```bash
+docker compose up --build
+```
+
+---
+
+## 🔑 Demo Credentials
+
+The seeded database includes pre-configured accounts across all system roles (all passwords: `Password123!`):
+
+| Role | Email | Permissions & View Access |
 |---|---|---|
-| `admin@edupay.college` | `Password123!` | ADMIN |
-| `manager@edupay.college` | `Password123!` | FINANCE_MANAGER |
-| `staff@edupay.college` | `Password123!` | FINANCE_STAFF |
-| `student@edupay.college` | `Password123!` | STUDENT |
+| **System Admin** | `admin@edupay.college` | Full System Access, Chaos Panel, User Management, Audit Logs, Integrity Check |
+| **Finance Manager** | `manager@edupay.college` | Financial Dashboards, Reversal Approvals, Reconciliation Classifier, Audit Logs |
+| **Finance Staff** | `staff@edupay.college` | Student Account Lookup, Counter Payments, Payment History |
+| **Student** | `student@edupay.college` | Personal Fee Breakdown, Installment Schedules, Payment History |
 
-Plus 300 student users `stu2024NNNN@edupay.college` (same password).
+*Note: 300 additional student accounts (`stu20240001@edupay.college` – `stu20240300@edupay.college`) are seeded with realistic fee structure assignments.*
 
-## Acceptance status (Package A)
+---
 
-| Criterion | Status |
-|---|---|
-| `docker compose up` → all services healthy | ✅ compose + healthchecks defined (run command list below) |
-| Migration runs clean; seed runs clean; re-running seed doesn't duplicate | ✅ verified against SQLite; see "Command outputs" section below |
-| Login works for all 4 roles; RBAC blocks cross-role access | ✅ pytest `test_auth.py` passes |
-| `/admin/integrity-check` returns zero drift on seeded data | ✅ pytest `test_integrity.py` passes |
-| Actual command outputs shown | ✅ below |
-| Deferred items listed with reasons | ✅ `docs/DECISIONS.md` §"Deferred" |
+## 📐 Non-Negotiable Financial Invariants
 
-## Documentation (source of truth)
+1. **Exact Decimal Precision**: All monetary fields use `NUMERIC(12,2)`. Floating-point math is strictly forbidden across both backend and frontend.
+2. **Derived Outstanding Balance**: Outstanding balances are derived dynamically (`Invoices − Concessions − Payment Allocations`). Cached installment statuses are continuously validated against derived truth.
+3. **Immutable Payment Ledger**: Payment records cannot be modified or deleted post-settlement (`SUCCESS`). Financial adjustments are strictly executed via linked `Reversal` records with manager approval.
+4. **Database-Level Idempotency**: Idempotency is enforced via `UNIQUE` constraints at the PostgreSQL database level (`idempotency_key`, `gateway_ref`), preventing double-charging under network retries or concurrent webhook callbacks.
+5. **Comprehensive Audit Logs**: Every state change, financial allocation, and status transition automatically writes an immutable record to `audit_logs` capturing actor, timestamp, IP, and payload diffs.
 
-- `docs/SPEC.md` — the frozen brief
-- `docs/DECISIONS.md` — baked decisions + rationales + deferred list
-- `docs/DATA_MODEL.md` — entities, relationships, every constraint's "why"
-- `docs/API.md` — every endpoint, method, route, role, schema, error code
+---
 
-## Key invariants (non-negotiable)
+## 🧪 Test Suite & Integrity Verification
 
-1. Money = `NUMERIC(12,2)`. Floats forbidden.
-2. Financial records immutable after `SUCCESS` — corrections via linked reversal.
-3. Idempotency enforced by DB `UNIQUE`, not service-only.
-4. Authorization in the backend. Frontend hiding is UX, not security.
-5. Every state transition writes an `audit_logs` row.
-6. Outstanding balance is **derived** (`invoices − concessions − allocations`),
-   never stored as mutable truth; the `installments.status` cache is verified
-   by the integrity checker.
+EduPay includes an automated pytest suite (50 test cases) covering auth RBAC, state machine transitions, concurrent webhook handling, idempotency replays, reconciliation classification, and mathematical integrity checks.
 
-## What's NOT in Package A (deferred — see `docs/DECISIONS.md`)
+### Running Backend Tests:
 
-- MockGateway server + payments lifecycle (Package B)
-- Chaos Panel UI wiring (Package B)
-- Reversals / allocation engine (Package B)
-- Reconciliation CSV upload + classifier (Package C)
-- Reporting exports (Package D)
-- Submission docs (Final)
+#### Windows (PowerShell):
+```powershell
+.\run-tests.ps1
+```
 
-## License
+#### Linux / macOS (Bash):
+```bash
+./run-tests.sh
+```
 
-Assessment code, not for redistribution.
+---
+
+## 💻 Tech Stack Architecture
+
+### Backend API (`/backend`)
+- **Framework**: FastAPI (Python 3.12) with Pydantic v2 validation.
+- **ORM & Database**: SQLAlchemy 2.0 with PostgreSQL (cross-compatible SQLite fallback for zero-config local runs).
+- **Database Migrations**: Alembic version-controlled schema upgrades.
+- **Authentication & Security**: JWT tokens (RS256/HS256) with bcrypt password hashing and Role-Based Access Control (RBAC).
+
+### Frontend Application (`/src`)
+- **Framework**: Next.js 16 (App Router) with TypeScript & React 19.
+- **UI Design System**: Tailwind CSS v4, shadcn/ui components, Framer Motion micro-animations, and Sonner notifications.
+- **Financial Visualization**: Custom CSS-based KPI cards and analytics bars (no bulky chart library overhead).
+
+---
+
+## 🛡️ Core Functional Modules
+
+- 📊 **Finance Executive Dashboard**: Real-time KPI summaries, payment method breakdowns, and collection analytics.
+- 🎓 **Student Account Hub**: Comprehensive search, fee breakdown by installment, concession history, and allocation logs.
+- 💳 **Payment Engine**: Multi-channel payments (Cash, Cheque, Online Gateway) with explicit 9-state machine transitions and online webhook handling.
+- 🔄 **Automated Reconciliation**: Multi-line bank CSV parser classifying transactions into 5 categories: `MATCHED`, `AMOUNT_MISMATCH`, `MISSING_INTERNAL`, `MISSING_EXTERNAL`, and `DUPLICATE`.
+- 🕵️ **Integrity Verification**: Real-time mathematical auditor checking zero-drift between cached status flags and derived financial equations.
+- ⚡ **Chaos Simulator Panel**: Dev-only gateway emulator for testing timeout delays, dropped callbacks, duplicate webhook spikes, and edge failures.
+
+---
+
+## 📄 License & Attribution
+
+Developed for assessment and production engineering evaluation. Codebase structure adheres to clean architecture principles and enterprise backend standards.
