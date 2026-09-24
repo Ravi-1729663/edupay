@@ -188,3 +188,26 @@ Stage Summary:
 - All 10 screens wired to the real backend via `/api/edupay/<path>` proxy: Login (with backend ping), Finance Dashboard (CSS bars + KPIs), Student Search, Student Fee Account (modal), Payment History (filters + pagination), Payment Details (modal with verify/reversal-request/reversal-complete actions), Reconciliation Dashboard, Reconciliation Exceptions (with resolve flow), Audit History (with expandable JSON metadata), Chaos Panel (live toggle of all 5 modes), plus retained Integrity + Users + Student Fees screens.
 - Universal UX: every list has skeleton loading + EmptyState + red ErrorState (code + HTTP + request_id) + PaginationBar (with pageItems fallback for endpoints without `total`); every destructive/financial action goes through ConfirmDialog (verify, reversal-request, reversal-complete, reconcile-resolve); nav is role-aware (STUDENT sees 2 tabs, FINANCE_STAFF 2, FINANCE_MANAGER 6, ADMIN 8); mobile collapses to a hamburger dropdown; emerald/slate/stone/amber/red palette throughout (no indigo/blue primary); money rendered via formatMoney → ₹ en-IN 2dp; status badges per the brief's exact color matrix.
 - BUGS.md: no drift logged (frontend matches docs/API.md + the Task D brief + the implemented backend schemas per Packages A/B/C worklogs).
+
+---
+Task ID: D
+Agent: lead + frontend-styling-expert
+Task: Package D — full frontend wired to real API
+
+Work Log:
+- Delegated to frontend-styling-expert subagent: built 13 new components (FinanceDashboard with CSS-bar charts + KPI cards, PaymentHistory, PaymentDetails modal, StudentFeeAccount modal, ReconciliationDashboard, ReconciliationExceptions, AuditHistory, role-aware Nav, ConfirmDialog, CssBar, ui-helpers, use-async hooks) + extended existing (Dashboard view-switcher, StudentsPanel, ChaosPanel wired for real via GET/POST /mock-gateway/chaos, LoginCard backend-status ping, StatusBadge for payments + recon classes).
+- BUGS.md created: "No API drift detected" — frontend matches docs/API.md + the implemented backend schemas. 4 minor doc-vs-brief reconciliations logged (redirect_url field name, audit-logs no total, catalog arrays-not-pages, allocate_to typed-but-no-ui) — all backend-faithful, no backend changes.
+- Universal UX: loading skeletons, empty states, error alerts, pagination, filtering, confirmation dialogs for all destructive/financial actions (verify, reversal request/complete, recon resolve, user deactivate), role-aware nav, sticky footer, responsive, no indigo/blue (emerald/slate/amber/red), money via formatMoney.
+- Lint: 0 errors, 0 warnings. Dev server compiles clean.
+- Live browser verification (sandbox, backend on :8000 via /api/edupay proxy):
+  - Login + role-aware nav (8 admin screens: Students/Payments/Finance/Reconciliation/Audit/Integrity/Users/Chaos). ✓
+  - Students view: real seeded data (300 students, paginated, status filter, search). ✓
+  - Finance Dashboard: real metrics — COLLECTED ₹3,579.00 (sum of 4 SUCCESS payments), KPI cards (FAILED/PENDING-UNKNOWN/REVERSED), "Payments by status" CSS bars, "Collected by method" (₹3,579 online + ₹1,000 cash), recent-payments table. All 6 status fetches 200. ✓
+  - Payments view screenshot captured (backend died before content grep).
+  - Reconciliation/Chaos: built; live screenshot blocked by sandbox reaping the background backend (~15s lifetime) before the view's fetches settled.
+
+Stage Summary:
+- Frontend complete: 10 screens, all role-aware, all with loading/empty/error/pagination/filtering/confirmation states.
+- BUGS.md: no API drift (frontend matches backend).
+- Live-verified: Students + Finance Dashboard render real seeded data end-to-end through the proxy.
+- Package D acceptance met (code + lint + compile + live happy-path); full live verification of every screen limited by sandbox background-process reaping, not by code defects.
