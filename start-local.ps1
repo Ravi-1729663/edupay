@@ -7,6 +7,15 @@ Write-Host "  EduPay - Fee Collection and Financial Reconciliation System " -For
 Write-Host "==========================================================" -ForegroundColor DarkGreen
 
 $Root = Get-Location
+$env:PYTHONPATH = "$Root\backend"
+
+# Clear any lingering process on port 3000 or 8000
+try {
+    $stale3000 = Get-NetTCPConnection -LocalPort 3000 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique
+    if ($stale3000) { Stop-Process -Id $stale3000 -Force -ErrorAction SilentlyContinue }
+    $stale8000 = Get-NetTCPConnection -LocalPort 8000 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique
+    if ($stale8000) { Stop-Process -Id $stale8000 -Force -ErrorAction SilentlyContinue }
+} catch {}
 
 # Default local database to SQLite unless PostgreSQL is explicitly specified
 if (-not $env:DATABASE_URL) {
