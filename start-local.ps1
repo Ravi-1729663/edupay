@@ -59,13 +59,8 @@ Write-Host "  - Finance Staff:     staff@edupay.college" -ForegroundColor White
 Write-Host "  - Student:           student@edupay.college" -ForegroundColor White
 Write-Host "==========================================================" -ForegroundColor DarkGreen
 
-# Launch FastAPI Backend in background job
-$BackendJob = Start-Job -ScriptBlock {
-    param($path, $db_url)
-    $env:DATABASE_URL = $db_url
-    Set-Location $path
-    python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
-} -ArgumentList "$Root\backend", $env:DATABASE_URL
+# Launch FastAPI Backend as a child process
+$BackendProcess = Start-Process python -ArgumentList "-m uvicorn app.main:app --host 127.0.0.1 --port 8000" -WorkingDirectory "$Root\backend" -PassThru -WindowStyle Hidden
 
 # Launch Frontend in foreground
 try {
@@ -74,6 +69,7 @@ try {
 finally {
     Write-Host ""
     Write-Host "Stopping backend process..." -ForegroundColor Yellow
-    Stop-Job $BackendJob
-    Remove-Job $BackendJob
+    if ($BackendProcess -and -not $BackendProcess.HasExited) {
+        Stop-Process -Id $BackendProcess.Id -Force -ErrorAction SilentlyContinue
+    }
 }
