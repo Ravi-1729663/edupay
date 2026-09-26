@@ -10,6 +10,9 @@ echo "=========================================================="
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Default local database to SQLite unless PostgreSQL is explicitly specified
+export DATABASE_URL="${DATABASE_URL:-sqlite:///$ROOT_DIR/backend/edupay_local.db}"
+
 # 1. Check Python
 echo -e "\n[1/4] Checking Python environment..."
 if ! command -v python3 &> /dev/null && ! command -v python &> /dev/null; then
@@ -21,7 +24,7 @@ PYTHON_CMD=$(command -v python3 || command -v python)
 # 2. Setup Backend Dependencies & DB
 echo "[2/4] Setting up Backend dependencies & database..."
 cd "$ROOT_DIR/backend"
-$PYTHON_CMD -m pip install -q -r requirements.txt
+$PYTHON_CMD -m pip install -q -r requirements.txt 2>/dev/null || true
 
 echo "Running database migrations..."
 $PYTHON_CMD -m alembic upgrade head
